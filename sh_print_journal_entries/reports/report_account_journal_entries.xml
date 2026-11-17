@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
    <template id="template_print_account_journal_entries_document">
-      <t t-set="doc" t-value="doc.with_context({'lang':doc.partner_id.lang})" />
+      <t t-set="doc" t-value="doc.with_context(lang=doc.partner_id.lang)" />
       <t t-call="web.external_layout">
          <div class="page">
             <div class="oe_structure" />
@@ -45,7 +45,7 @@
                <t t-foreach="doc.line_ids" t-as="line">
                   <tr>
                      <td>
-                        <span t-esc="no" />
+                        <span t-out="no" />
                      </td>
                      <td>
                         <span t-field="line.account_id" />
@@ -57,7 +57,8 @@
                         <span t-field="line.name" />
                      </td>
                      <td>
-                        <span t-field="line.analytic_account_id" />
+                        <!-- analytic_account_id was replaced by the JSON analytic_distribution in Odoo 16 -->
+                        <span t-out="line._sh_analytic_display()" />
                      </td>
                      <td>
                         <span t-field="line.debit" />
@@ -86,7 +87,7 @@
                            <t t-set="reg" t-value="reg+i.debit" />
                         </span>
                      </t>
-                     <span t-esc="reg" />
+                     <span t-out="reg" />
                   </td>
                   <td style="border-top: 1px solid black;">
                      <t t-set="reg" t-value="0" />
@@ -95,7 +96,7 @@
                            <t t-set="reg" t-value="reg+i.credit" />
                         </span>
                      </t>
-                     <span t-esc="reg" />
+                     <span t-out="reg" />
                   </td>
                   <td style="border-top: 1px solid black;" />
                </tr>
