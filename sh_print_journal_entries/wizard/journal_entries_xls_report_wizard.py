@@ -2,10 +2,73 @@
 # Part of Softhealer Technologies.
 
 from odoo import fields, models
+from odoo.tools import html2plaintext
 import xlwt
 import base64
 from io import BytesIO
-import html2text
+
+INVALID_SHEET_CHARS = r"[]:\/?*"
+
+
+def _sheet_name(name, used_names):
+    """Build a worksheet name xlwt accepts.
+
+    Excel forbids ``[]:\\/?*`` in sheet names, caps them at 31 characters and
+    requires them to be unique inside a workbook.  Journal entry names such as
+    ``MISC/2026/08/0001`` break all three rules, so sanitise them here.
+    """
+    name = name or "Draft"
+    for char in INVALID_SHEET_CHARS:
+        name = name.replace(char, "-")
+    name = name.strip() or "Draft"
+    name = name[:31]
+
+    candidate = name
+    suffix = 1
+    while candidate in used_names:
+        suffix += 1
+        tail = " (%s)" % suffix
+        candidate = name[:31 - len(tail)] + tail
+    used_names.add(candidate)
+    return candidate
+
+
+class AccountMoveLine(models.Model):
+    _inherit = "account.move.line"
+
+    def _sh_analytic_display(self):
+        """Render ``analytic_distribution`` the way the old analytic_account_id read.
+
+        ``account.move.line.analytic_account_id`` was dropped in Odoo 16 in
+        favour of the JSON ``analytic_distribution`` field, whose keys are comma
+        separated analytic account ids (one per plan) and whose values are
+        percentages.  Shared by the Xls export and the QWeb report so both show
+        exactly the same text.
+        """
+        self.ensure_one()
+        distribution = self.analytic_distribution or {}
+        if not distribution:
+            return ""
+
+        account_ids = []
+        for key in distribution:
+            for account_id in str(key).split(","):
+                account_id = int(account_id)
+                if account_id not in account_ids:
+                    account_ids.append(account_id)
+        accounts = self.env["account.analytic.account"].browse(account_ids).exists()
+        names = {account.id: account.display_name for account in accounts}
+
+        parts = []
+        for key, percentage in distribution.items():
+            labels = [
+                names[int(account_id)]
+                for account_id in str(key).split(",")
+                if int(account_id) in names
+            ]
+            if labels:
+                parts.append("%s %g%%" % (" | ".join(labels), percentage))
+        return ", ".join(parts)
 
 
 class JournalEntriesDetailExcelExtended(models.Model):
@@ -59,20 +122,22 @@ class ShJournalEntriesDetailsReportWizard(models.TransientModel):
 
         account_move = self.env['account.move'].search(
             [('id', 'in', active_ids)])
-        
-        handle = html2text.HTML2Text()
+
+        used_sheet_names = set()
         for move in account_move:
             journal_lines = []
             final_value = {}
             count = 0
 
-            final_value['journal_name'] = move.name
+            # a draft move has no name in Odoo 18 (it was '/' in 15); keep the
+            # old display instead of letting xlwt turn False into 0
+            final_value['journal_name'] = move.name or '/'
             final_value['ref'] = move.ref
             final_value['date'] = move.date
             final_value['journal_id'] = move.journal_id.name
             final_value['narration'] = ''
-            if move.narration :
-                final_value['narration'] = handle.handle(move.narration)
+            if move.narration:
+                final_value['narration'] = html2plaintext(move.narration)
 
             for lines in move.line_ids:
                 count += 1
@@ -81,18 +146,19 @@ class ShJournalEntriesDetailsReportWizard(models.TransientModel):
                     'account_id': lines.account_id,
                     'partner_id': lines.partner_id,
                     'name': lines.name,
-                    'analytic_account_id': lines.analytic_account_id,
+                    'analytic_account_id': lines._sh_analytic_display(),
                     'debit': lines.debit,
                     'credit': lines.credit,
                     'date_maturity': lines.date_maturity,
                 }
                 journal_lines.append(product)
 
-            if move.name == '/':
-                worksheet = workbook.add_sheet("Draft", cell_overwrite_ok=True)
+            if not move.name or move.name == '/':
+                worksheet = workbook.add_sheet(
+                    _sheet_name("Draft", used_sheet_names), cell_overwrite_ok=True)
             else:
                 worksheet = workbook.add_sheet(
-                    move.name, cell_overwrite_ok=True)
+                    _sheet_name(move.name, used_sheet_names), cell_overwrite_ok=True)
 
             worksheet.write_merge(
                 0, 1, 0, 7, 'Journal Entries Details', heading_format)

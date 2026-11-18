@@ -10,7 +10,7 @@
 
     "support": "support@softhealer.com",
 
-    "version": "15.0.2",
+    "version": "18.0.1.0.0",
 
     "category": "Accounting",
 
@@ -25,6 +25,8 @@
             "reports/report_account_journal_entries.xml",
             "wizard/journal_entries_xls_report_wizard.xml",
         ],
+   	"external_dependencies": {"python": ["xlwt"]},
+
    	"images": ["static/description/background.png", ],
 
    	"installable": True,
